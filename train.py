@@ -333,12 +333,20 @@ class MaterialTrainer:
             )
         
         # Also save the best model
-        if metrics['accuracy'] > self.best_acc:
-            self.best_acc = metrics['accuracy']
-            torch.save(
-                checkpoint,
-                osp.join(self.exp_dir, 'best_model.pth')
-            )
+        if self.args.task == 'contrastive':
+            if metrics['loss'] < self.best_loss:
+                self.best_loss = metrics['loss']
+                torch.save(
+                    checkpoint,
+                    osp.join(self.exp_dir, 'best_model.pth')
+                )
+        else:    
+            if metrics['accuracy'] > self.best_acc:
+                self.best_acc = metrics['accuracy']
+                torch.save(
+                    checkpoint,
+                    osp.join(self.exp_dir, 'best_model.pth')
+                )
 
     def save_visualizations(self, all_preds, all_labels, split):
         """Save visualization plots
