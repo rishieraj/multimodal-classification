@@ -12,6 +12,7 @@ from tqdm import tqdm
 import argparse
 import torch.nn as nn
 import torch.nn.functional as F
+from models.contrastive import ModalityEncoder as ContrastiveEncoder
 
 class RetrievalDataset:
     """Dataset class for cross-modal retrieval evaluation.
@@ -21,7 +22,7 @@ class RetrievalDataset:
     of query and target samples from specified modalities.
     """
     
-    def __init__(self, data_root, split_path, modalities, query_modality, target_modality):
+    def __init__(self, data_root, split_path, query_modality, target_modality):
         """Initialize the retrieval dataset.
         
         Args:
@@ -118,12 +119,28 @@ class RetrievalDataset:
         Returns:
             dict: Batched samples
         """
-        return {
-            'query': torch.stack([item['query'] for item in batch]),
-            'target': torch.stack([item['target'] for item in batch]),
-            'query_meta': [item['query_meta'] for item in batch],
-            'target_meta': [item['target_meta'] for item in batch]
-        }
+        if self.query_modality == 'audio':
+            data = {
+                'query': torch.stack([item['query'].unsqueeze(0) for item in batch]),
+                'target': torch.stack([item['target'] for item in batch]),
+                'query_meta': [item['query_meta'] for item in batch],
+                'target_meta': [item['target_meta'] for item in batch]
+            }
+        elif self.target_modality == 'audio':
+            data = {
+                'query': torch.stack([item['query'] for item in batch]),
+                'target': torch.stack([item['target'].unsqueeze(0) for item in batch]),
+                'query_meta': [item['query_meta'] for item in batch],
+                'target_meta': [item['target_meta'] for item in batch]
+            }
+        else:
+            data = {
+                'query': torch.stack([item['query'] for item in batch]),
+                'target': torch.stack([item['target'] for item in batch]),
+                'query_meta': [item['query_meta'] for item in batch],
+                'target_meta': [item['target_meta'] for item in batch]
+            }
+        return data
 
 class ModalityEncoder(nn.Module):
     """Encoder network for different modalities.
@@ -140,7 +157,8 @@ class ModalityEncoder(nn.Module):
     """
     def __init__(self, modality, feature_dim, num_classes):
         # TODO: Initialize the encoder
-        pass
+        super().__init__()
+        self.backbone = ContrastiveEncoder(modality, feature_dim, num_classes)
 
     def _build_backbone(self):
         # TODO: Build an appropriate backbone network
@@ -148,7 +166,11 @@ class ModalityEncoder(nn.Module):
 
     def forward(self, x):
         # TODO: Implement the forward pass
-        pass
+        outputs = self.backbone.backbone({self.backbone.modality: x})
+        features = outputs['pred']
+        projected_features = self.backbone.projector(features)
+        projected_features = F.normalize(projected_features, dim=-1)
+        return projected_features
 
 class ModalityRetrieval:
     """Cross-modal retrieval using pretrained encoders and nearest neighbor search.
@@ -166,7 +188,17 @@ class ModalityRetrieval:
     
     def __init__(self, pretrained_model_path, modalities):
         # TODO: Initialize the retrieval system
-        pass
+        self.encoders = {}
+        for modality in modalities:
+            encoder = ModalityEncoder(modality, feature_dim=128, num_classes=98).to('cuda')
+            ckpt = torch.load(pretrained_model_path, map_location='cuda')
+            encoder.backbone.load_state_dict(ckpt['model_state_dict'], strict=False)
+            encoder.eval()
+            self.encoders[modality] = encoder
+
+        self.modalities = modalities
+        self.query_modality = modalities[0]
+        self.target_modality = modalities[1]
 
     def build_database(self, dataloader):
         """Build a database of features for retrieval.
@@ -179,7 +211,17 @@ class ModalityRetrieval:
             dataloader: DataLoader containing database samples
         """
         # TODO: Implement database building
-        pass
+        features_list = []
+        meta_list = []
+        encoder = self.encoders[self.target_modality]
+        with torch.no_grad():
+            for batch in tqdm(dataloader, desc="Building database"):
+                data = batch['target'].to('cuda')
+                feats = encoder(data)
+                features_list.append(feats.cpu().numpy())
+                meta_list.extend(batch['target_meta'])
+        self.database_features = np.concatenate(features_list, axis=0)
+        self.database_meta = meta_list
 
     def retrieve(self, query_batch):
         """Retrieve nearest neighbors for a batch of queries.
@@ -196,7 +238,19 @@ class ModalityRetrieval:
             list: Retrieved metadata for each query
         """
         # TODO: Implement retrieval
-        pass
+        encoder = self.encoders[self.query_modality]
+        with torch.no_grad():
+            query_data = query_batch['query'].to('cuda')
+            query_feats = encoder(query_data)
+            query_feats = query_feats.cpu().numpy()
+            similarity = np.dot(query_feats, self.database_features.T)
+            sorted_indices = np.argsort(-similarity, axis=1)
+            results = []
+            for i in range(query_feats.shape[0]):
+                retrieved_meta = [self.database_meta[j] for j in sorted_indices[i]]
+                results.append(retrieved_meta)
+
+        return results
 
     def evaluate(self, query_loader):
         """Evaluate retrieval performance.
@@ -220,35 +274,21 @@ class ModalityRetrieval:
         correct_5 = 0
         total = 0
         aps = []  # check the ap of each query
+        encoder = self.encoders[self.query_modality]
         
         with torch.no_grad():
             for batch in tqdm(query_loader):
                 # Get the query feature
-                query = batch['query'].cuda()
-                if self.query_modality == 'touch':
-                    features = self.model.encoders[self.query_modality].backbone.backbone(query)
-                else:  # vision or audio
-                    if self.query_modality == 'audio' and query.dim() == 3:
-                        query = query.unsqueeze(1)
-                    features = self.model.encoders[self.query_modality].backbone.features(query)
-            
-                if features.dim() > 2:
-                    features = features.flatten(1)
-                # get the projected feature
-                projected = self.model.encoders[self.query_modality].projector(features)
-                projected = F.normalize(projected, dim=1)
-                
-                # get the similarity
-                database_features = torch.from_numpy(self.database_features).cuda()
-                similarity = torch.mm(projected, database_features.t())
-                
-                # get the sorted index
-                _, indices = similarity.sort(dim=1, descending=True)
+                query_data = batch['query'].to('cuda')
+                query_feats = encoder(query_data)  # (B, feature_dim)
+                query_feats = query_feats.cpu().numpy()
+                similarity = np.dot(query_feats, self.database_features.T)
+                sorted_indices = np.argsort(-similarity, axis=1)
                 
                 # get the accuracy and AP
                 for i, query_meta in enumerate(batch['query_meta']):
                     query_obj = query_meta[0]
-                    retrieved_objs = [self.database_meta[j][0] for j in indices[i].cpu().numpy()]
+                    retrieved_objs = [self.database_meta[j][0] for j in sorted_indices[i]]
                     
                     # get the R@k
                     if query_obj == retrieved_objs[0]:
@@ -302,7 +342,21 @@ def main():
     results = {}
     
     # TODO: Implement the evaluation loop for both directions
+    retrieval_dataset = RetrievalDataset(
+        data_root=args.data_root,
+        split_path=args.split_location,
+        query_modality=args.query_modality,
+        target_modality=args.target_modality
+    )
+    dataloader = DataLoader(retrieval_dataset, batch_size=args.batch_size, num_workers=args.num_workers, collate_fn=retrieval_dataset.collate_fn)
     
+    retrieval_system = ModalityRetrieval(
+        pretrained_model_path=args.pretrained_path,
+        modalities=modalities,
+    )
+    
+    results = retrieval_system.evaluate(dataloader)
+
     # Save results
     with open('retrieval_results.json', 'w') as f:
         json.dump(results, f, indent=2)
