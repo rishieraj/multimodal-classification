@@ -3,7 +3,7 @@ export PYTHONPATH="$HOME/Documents/Semester-4/CMSC848M/Week-5/Coding Assignment/
 
 DATA_ROOT="dataset/"
 SPLIT_PATH="contrastive_split.json"
-PRETRAINED_PATH="experiments/contrastive/contrastive_exp/best_model.pth"
+PRETRAINED_PATH="experiments/contrastive/contrastive_exp"
 
 # vision -> touch
 python models/retrieval.py \

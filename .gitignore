@@ -1,5 +1,6 @@
 dataset/
 experiments/
 testing.ipynb
+data/__pycache__/
 models/__pycache__/
 .ipynb_checkpoints/

@@ -1,5 +1,6 @@
 # task4_retrieval.py
 
+import os
 import os.path as osp
 import json
 import numpy as np
@@ -158,17 +159,24 @@ class ModalityEncoder(nn.Module):
     def __init__(self, modality, feature_dim, num_classes):
         # TODO: Initialize the encoder
         super().__init__()
-        self.backbone = ContrastiveEncoder(modality, feature_dim, num_classes)
+        self.encoder = ContrastiveEncoder(modality, feature_dim, num_classes)
+        self.modality = modality
+        self._build_backbone()
+
+        for param in self.encoder.parameters():
+            param.requires_grad = False
 
     def _build_backbone(self):
         # TODO: Build an appropriate backbone network
-        pass
+        ckpt_path = f"experiments/contrastive/contrastive_exp/{self.modality}_encoder_only.pth"
+        ckpt = torch.load(ckpt_path, map_location="cuda", weights_only=False)
+        self.encoder.load_state_dict(ckpt['model_state_dict'])
 
     def forward(self, x):
         # TODO: Implement the forward pass
-        outputs = self.backbone.backbone({self.backbone.modality: x})
+        outputs = self.encoder.backbone({self.encoder.modality: x})
         features = outputs['pred']
-        projected_features = self.backbone.projector(features)
+        projected_features = self.encoder.projector(features)
         projected_features = F.normalize(projected_features, dim=-1)
         return projected_features
 
@@ -191,8 +199,6 @@ class ModalityRetrieval:
         self.encoders = {}
         for modality in modalities:
             encoder = ModalityEncoder(modality, feature_dim=128, num_classes=98).to('cuda')
-            ckpt = torch.load(pretrained_model_path, map_location='cuda')
-            encoder.backbone.load_state_dict(ckpt['model_state_dict'], strict=False)
             encoder.eval()
             self.encoders[modality] = encoder
 
@@ -358,7 +364,11 @@ def main():
     results = retrieval_system.evaluate(dataloader)
 
     # Save results
-    with open('retrieval_results.json', 'w') as f:
+    out_path = f"experiments/retrieval"
+    if not osp.exists(out_path):
+        os.makedirs(out_path)
+
+    with open(f"{out_path}/{args.query_modality}_{args.target_modality}_results.json", 'w') as f:
         json.dump(results, f, indent=2)
 
 if __name__ == '__main__':

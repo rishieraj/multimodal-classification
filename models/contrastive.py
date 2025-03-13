@@ -199,28 +199,36 @@ class ContrastiveLearning(nn.Module):
             torch.Tensor: Calculated contrastive loss
         """
         # TODO: Implement InfoNCE loss
-        batch_size = features_1.shape[0]
-        sim_matrix = torch.matmul(features_1, features_2.T) / self.temperature
-        diag_mask = torch.eye(batch_size, dtype=torch.bool, device=features_1.device)
+        batch_size = features_1.size(0)
+        # Compute similarity matrix
+        sim_matrix = torch.matmul(features_1, features_2.T)
+        # Apply temperature scaling
+        sim_matrix_1 = sim_matrix / self.temperature
+        # Mask diagonal entries
+        mask = ~torch.eye(batch_size, dtype=torch.bool, device=sim_matrix.device)
+        # Handle positive and negative pairs
+        negatives = sim_matrix_1[mask].view(batch_size, -1)
+        positives = torch.diag(sim_matrix_1)
+        # Implement hard negative mining
+        topk_negatives, _ = negatives.topk(k=min(16, batch_size-1), dim=1)
+        # Calculate loss
+        exp_pos = torch.exp(positives)
+        exp_negs = torch.exp(topk_negatives)
+        num = exp_pos
+        denom = exp_pos + torch.sum(exp_negs, dim=1)
+        loss_1 = -torch.mean(torch.log(num / denom))
 
-        # Forward hinge loss
-        # Separating positive pairs
-        pos_matrix = torch.diag(sim_matrix).unsqueeze(1)
-        pos_matrix = pos_matrix.expand_as(sim_matrix)
+        # Repeat for the other set of features
+        sim_matrix_2 = sim_matrix.T / self.temperature
+        negatives = sim_matrix_2[mask].view(batch_size, -1)
+        positives = torch.diag(sim_matrix_2)
+        topk_negatives, _ = negatives.topk(k=min(16, batch_size-1), dim=1)
+        exp_pos = torch.exp(positives)
+        exp_negs = torch.exp(topk_negatives)
+        num = exp_pos
+        denom = exp_pos + torch.sum(exp_negs, dim=1)
+        loss_2 = -torch.mean(torch.log(num / denom))
 
-        # Hinge loss
-        loss_12 = torch.clamp(0.2 + sim_matrix - pos_matrix, min=0)
-        loss_12.masked_fill_(diag_mask, 0.0)
-        loss_12 = loss_12.sum() / (batch_size * (batch_size - 1))
-
-        # Backward hinge loss
-        # Separating positive pairs
-        pos_matrix_T = torch.diag(sim_matrix.T).unsqueeze(0)
-        pos_matrix_T = pos_matrix_T.expand_as(sim_matrix.T)
-
-        # Hinge loss
-        loss_21 = torch.clamp(0.2 + sim_matrix.T - pos_matrix_T, min=0)
-        loss_21.masked_fill_(diag_mask, 0.0)
-        loss_21 = loss_21.sum() / (batch_size * (batch_size - 1))
-
-        return loss_12 + loss_21
+        # Average the two losses
+        loss = (loss_1 + loss_2) / 2.0
+        return loss

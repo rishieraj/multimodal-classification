@@ -340,6 +340,13 @@ class MaterialTrainer:
                     checkpoint,
                     osp.join(self.exp_dir, 'best_model.pth')
                 )
+
+                for mod in self.model.modalities:
+                    sub_encoder = getattr(self.model, f"{mod}_encoder")
+                    sub_dict = sub_encoder.state_dict()
+                    
+                    out_path = osp.join(self.exp_dir, f"{mod}_encoder_only.pth")
+                    torch.save({"model_state_dict": sub_dict}, out_path)
         else:    
             if metrics['accuracy'] > self.best_acc:
                 self.best_acc = metrics['accuracy']

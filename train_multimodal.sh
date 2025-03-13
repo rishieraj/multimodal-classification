@@ -11,7 +11,7 @@ python train.py \
     --modality_list vision touch audio \
     --batch_size 32 \
     --lr 1e-3 \
-    --weight_decay 1e-3 \
+    --weight_decay 1e-2 \
     --epochs 50 \
     --data_location ${DATA_ROOT} \
     --config_location ${CONFIG_PATH} \
@@ -27,7 +27,7 @@ python train.py \
     --modality_list vision touch audio \
     --batch_size 32 \
     --lr 1e-3 \
-    --weight_decay 1e-3 \
+    --weight_decay 1e-2 \
     --epochs 50 \
     --data_location ${DATA_ROOT} \
     --config_location ${CONFIG_PATH} \

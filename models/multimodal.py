@@ -30,7 +30,7 @@ class LateFusion(nn.Module):
 
         # Fusion layer
         self.fc = nn.Sequential(
-            nn.Linear(3 * num_classes, 512),
+            nn.Linear(11 * 11 * 11, 512),
             nn.ReLU(),
             nn.Linear(512, num_classes)
         )
@@ -64,12 +64,36 @@ class LateFusion(nn.Module):
         4. Calculate and return loss if training
         """
         # TODO: Implement forward pass
-        vision_preds = self.vision_model(modalities)['pred']
-        touch_preds = self.touch_model(modalities)['pred']
-        audio_preds = self.audio_model(modalities)['pred']
+        vision_feats = self.vision_model.backbone(modalities['vision'])
+        touch_feats = self.touch_model.backbone.forward_head(
+            self.touch_model.attention(
+                self.touch_model.backbone.forward_features(modalities['touch'])
+            )
+        )
+        audio_feats = self.audio_model.backbone.forward_head(
+            self.audio_model.attention(
+                self.audio_model.backbone.forward_features(modalities['audio'])
+            )
+        )
 
-        fusion_preds = torch.cat([vision_preds, touch_preds, audio_preds], dim=1)
-        logits = self.fc(fusion_preds)
+        # Batch size
+        batch_size = vision_feats.size(0)
+
+        # Extend feature vectors
+        vision_extnd = torch.ones(batch_size, 1, device=vision_feats.device)
+        vision_feats = torch.cat([vision_feats, vision_extnd], dim=1)
+
+        touch_extnd = torch.ones(batch_size, 1, device=touch_feats.device)
+        touch_feats = torch.cat([touch_feats, touch_extnd], dim=1)
+        
+        audio_extnd = torch.ones(batch_size, 1, device=audio_feats.device)
+        audio_feats = torch.cat([audio_feats, audio_extnd], dim=1)
+
+        # 3D tensor fusion
+        fused_feats = torch.einsum('bi,bj,bk->bijk', vision_feats, touch_feats, audio_feats)
+
+        # Flatten and pass through MLP
+        logits = self.fc(fused_feats.view(batch_size, -1))
 
         output = {'pred': logits}
         if 'label' in modalities:
@@ -102,7 +126,7 @@ class AttentionFusion(nn.Module):
                 param.requires_grad = False
 
         # Project to common feature space
-        self.feature_proj = nn.Linear(num_classes, num_heads * num_classes)
+        self.feature_proj = nn.Linear(10, num_heads * num_classes)
 
         # Multi-head attention fusion
         self.attention = nn.MultiheadAttention(embed_dim=num_classes * num_heads, num_heads=num_heads)
@@ -144,12 +168,24 @@ class AttentionFusion(nn.Module):
         5. Calculate and return loss if training
         """
         # TODO: Implement forward pass
-        vision_preds = self.feature_proj(self.vision_model(modalities)['pred'])
-        touch_preds = self.feature_proj(self.touch_model(modalities)['pred'])
-        audio_preds = self.feature_proj(self.audio_model(modalities)['pred'])
+        vision_feats = self.feature_proj(self.vision_model.backbone(modalities['vision']))
+        touch_feats = self.feature_proj(
+            self.touch_model.backbone.forward_head(
+                self.touch_model.attention(
+                    self.touch_model.backbone.forward_features(modalities['touch'])
+                )
+            )
+        )
+        audio_feats = self.feature_proj(
+            self.audio_model.backbone.forward_head(
+                self.audio_model.attention(
+                    self.audio_model.backbone.forward_features(modalities['audio'])
+                )
+            )
+        )
 
         # Project to common feature space
-        kv = torch.stack([vision_preds, touch_preds, audio_preds], dim=0)
+        kv = torch.stack([vision_feats, touch_feats, audio_feats], dim=0)
 
         # Apply multi-head attention
         attended, _ = self.attention(kv, kv, kv)
