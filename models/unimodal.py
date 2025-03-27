@@ -22,11 +22,14 @@ class FAP(nn.Module):
         return x
 
 class ModifiedResNet(nn.Module):
-    """Modified ResNet18 for material classification"""
+    """Modified ResNet18 for material classification with final linear and pooling layers removed"""
     def __init__(self, in_channels=3, pretrained=True):
         super().__init__()
+        # Load ResNet18 model with pretrained weights
         resnet = models.resnet18(weights='IMAGENET1K_V1') if pretrained else models.resnet18(weights=None)
+        # Modify first conv layer based on input channels
         resnet.conv1 = nn.Conv2d(in_channels, 64, kernel_size=7, stride=2, padding=3, bias=False)
+        # Remove final pooling and linear layers
         self.resnet = nn.Sequential(*list(resnet.children())[:-2])
 
     def forward(self, x):
@@ -36,8 +39,10 @@ class UpsampleBlock(nn.Module):
     """Upsampling block with depthwise separable convolution"""
     def __init__(self, in_channels, out_channels):
         super().__init__()
+        # Depthwise separable convolution
         self.depthwise = nn.Conv2d(in_channels, in_channels, kernel_size=3, padding=1, groups=in_channels, bias=False)
         self.pointwise = nn.Conv2d(in_channels, out_channels, kernel_size=1, bias=False)
+        # Upsampling layer
         self.upsample = nn.ConvTranspose2d(out_channels, out_channels, kernel_size=3, stride=2, padding=1, output_padding=1)
         self.relu = nn.ReLU(inplace=True)
 
@@ -124,11 +129,13 @@ class FENet(nn.Module):
         )
 
     def forward_features(self, x):
+        """Forward pass for FENet backbone"""
         x = self.backbone(x)
         x = self.upsample_blocks(x)
         return x
     
     def forward_head(self, x):
+        """Forward pass for FENet head"""
         global_feat = self.global_pool(x).view(x.size(0), -1)
         x_fap = self.pre_fap_conv(x)
         fap_feat = self.fap(x_fap)
@@ -155,26 +162,33 @@ class SpatialAttention(nn.Module):
         self.sigmoid = nn.Sigmoid()
 
     def forward(self, x):
+        # Compute average and max pooling
         avg_pool = torch.mean(x, dim=1, keepdim=True)
         max_pool, _ = torch.max(x, dim=1, keepdim=True)
+        # Concatenate and apply convolution
         attn = torch.cat([avg_pool, max_pool], dim=1)
         attn = self.conv(attn)
         attn = self.sigmoid(attn)
+        # Apply attention to input
         return x * attn
 
 class FrequencyAttention(nn.Module):
     """Frequency Attention Mechanism for audio input"""
     def __init__(self, channels):
         super().__init__()
+        # Depthwise convolution for frequency attention
         self.depthwise_conv = nn.Conv1d(in_channels=channels, out_channels=channels, kernel_size=3, padding=1, groups=channels)
         self.sigmoid = nn.Sigmoid()
 
     def forward(self, x):
-        # 1. 
+        # Compute average pooling along frequency axis
         x_avg = torch.mean(x, dim=3)
+        # Apply depthwise convolution and sigmoid
         attn = self.depthwise_conv(x_avg)
         attn = self.sigmoid(attn)
+        # Expand dimensions for broadcasting
         attn = attn.unsqueeze(3)
+        # Apply attention to input
         return x * attn
 
 class VisionClassifier(nn.Module):
@@ -206,8 +220,12 @@ class VisionClassifier(nn.Module):
         # TODO: Implement forward pass
         x = batch['vision']
         feat = self.backbone(x)
+        # Flatten it to (B, C)
+        if len(feat.shape) > 2:
+            feat = F.adaptive_avg_pool2d(feat, (1, 1)).view(feat.size(0), -1)
         logits = self.classifier(feat)
 
+        # Return predictions and loss
         output = {'pred': logits}
         if 'label' in batch:
             output['loss'] = F.cross_entropy(logits, batch['label'])
@@ -256,6 +274,7 @@ class TouchClassifier(nn.Module):
         # 4. Get the logits from the classifier
         logits = self.classifier(feat)
 
+        # Return predictions and loss
         output = {'pred': logits}
         if 'label' in batch:
             output['loss'] = F.cross_entropy(logits, batch['label'])
@@ -303,6 +322,7 @@ class AudioClassifier(nn.Module):
         # 4. Get the logits from the classifier
         logits = self.classifier(feat)
 
+        # Return predictions and loss
         output = {'pred': logits}
         if 'label' in batch:
             output['loss'] = F.cross_entropy(logits, batch['label'])

@@ -29,18 +29,17 @@ class ModalityEncoder(nn.Module):
         else:
             self.backbone = AudioClassifier(7, backbone='fenet')
 
-        self.modality = modality
-        
+        # Save modality
+        self.modality = modality     
         # Load pretrained weights
         self.load_pretrained_weights(modality)
 
         # Projection head
         self.projector = nn.Sequential(
-            nn.Linear(7, output_dim),
+            nn.Linear(10, output_dim),
             nn.ReLU(),
             nn.Linear(output_dim, output_dim)
         )
-
         # Freeze backbone
         for param in self.backbone.parameters():
             param.requires_grad = False
@@ -54,12 +53,13 @@ class ModalityEncoder(nn.Module):
         3. Handle loading errors
         """
         base_path = 'experiments/unimodal'
+        # Load correct checkpoint
         if modality == 'vision':
-            ckpt = torch.load(f'{base_path}/visual_exp/best_model.pth', weights_only=False)
+            ckpt = torch.load(f'{base_path}/visual_exp/best_model.pth', map_location="cuda" ,weights_only=False)
         elif modality == 'touch':
-            ckpt = torch.load(f'{base_path}/touch_exp/best_model.pth', weights_only=False)
+            ckpt = torch.load(f'{base_path}/touch_exp/best_model.pth', map_location="cuda", weights_only=False)
         else:
-            ckpt = torch.load(f'{base_path}/audio_exp/best_model.pth', weights_only=False)
+            ckpt = torch.load(f'{base_path}/audio_exp/best_model.pth', map_location="cuda", weights_only=False)
         
         # TODO: Load state dict and handle errors
         try:
@@ -82,9 +82,27 @@ class ModalityEncoder(nn.Module):
             tuple: (features, projected_features)
         """
         # TODO: Implement forward pass
-        outputs = self.backbone(x)
-        features = outputs['pred']
-        projected_features = self.projector(features)
+        # Extract features from backbone
+        if self.modality == 'vision':
+            features = self.backbone.backbone(x['vision'])
+            projected_features = self.projector(features)
+
+        elif self.modality == 'touch':
+            features = self.backbone.backbone.forward_head(
+                self.backbone.attention(
+                    self.backbone.backbone.forward_features(x['touch'])
+                )
+            )
+            projected_features = self.projector(features)
+        else:
+            features = self.backbone.backbone.forward_head(
+                self.backbone.attention(
+                    self.backbone.backbone.forward_features(x['audio'])
+                )
+            )
+            projected_features = self.projector(features)
+
+        # Normalize projected features
         projected_features = F.normalize(projected_features, dim=-1)
         return (features, projected_features)
 
@@ -131,12 +149,12 @@ class ContrastiveLearning(nn.Module):
         for modality in self.modalities:
             x1 = batch[f'{modality}_1']
             x2 = batch[f'{modality}_2']
-
+            # Extract the encoder
             encoder = getattr(self, f'{modality}_encoder')
-
+            # Extract features and projections
             feats_1, proj_1 = encoder({modality: x1})
             feats_2, proj_2 = encoder({modality: x2})
-
+            # Save outputs
             modality_outputs[f'{modality}_1'] = (feats_1, proj_1)
             modality_outputs[f'{modality}_2'] = (feats_2, proj_2)
 
@@ -173,6 +191,7 @@ class ContrastiveLearning(nn.Module):
         # Combine weighted losses
         total_loss = lambda_intra * total_intra_loss + lambda_cross * total_cross_loss
 
+        # Return loss, features and projections
         features_dict = {}
         projections_dict = {}
         for key, (feats, proj) in modality_outputs.items():

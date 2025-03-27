@@ -33,12 +33,12 @@ class RetrievalDataset:
             query_modality (str): Modality to use as query (e.g., 'vision', 'touch', 'audio')
             target_modality (str): Modality to retrieve (e.g., 'vision', 'touch', 'audio')
         """
+        # Set up paths to data
         self.paths = {
             'vision': osp.join(data_root, 'vision'),
             'touch': osp.join(data_root, 'touch'),
             'audio': osp.join(data_root, 'audio_examples')
         }
-        
         # Load dataset splits and labels
         with open(osp.join(data_root, 'label.json')) as f:
             self.label_dict = json.load(f)
@@ -46,14 +46,13 @@ class RetrievalDataset:
             splits = json.load(f)
             self.query_samples = []
             self.target_samples = []
-            
             # Build query-target pairs
-            for obj in splits['test']:  # Using test set for evaluation
+            for obj in splits['test']:
                 instances = splits['test'][obj]
                 for instance in instances:
                     self.query_samples.append((obj, instance))
                     self.target_samples.append((obj, instance))
-                    
+        
         self.query_modality = query_modality
         self.target_modality = target_modality
         
@@ -162,22 +161,20 @@ class ModalityEncoder(nn.Module):
         self.encoder = ContrastiveEncoder(modality, feature_dim, num_classes)
         self.modality = modality
         self._build_backbone()
-
+        # Freeze the encoder
         for param in self.encoder.parameters():
             param.requires_grad = False
 
     def _build_backbone(self):
         # TODO: Build an appropriate backbone network
+        # Load the pretrained encoder
         ckpt_path = f"experiments/contrastive/contrastive_exp/{self.modality}_encoder_only.pth"
         ckpt = torch.load(ckpt_path, map_location="cuda", weights_only=False)
         self.encoder.load_state_dict(ckpt['model_state_dict'])
 
     def forward(self, x):
         # TODO: Implement the forward pass
-        outputs = self.encoder.backbone({self.encoder.modality: x})
-        features = outputs['pred']
-        projected_features = self.encoder.projector(features)
-        projected_features = F.normalize(projected_features, dim=-1)
+        _, projected_features = self.encoder.forward({self.modality: x})
         return projected_features
 
 class ModalityRetrieval:
@@ -196,12 +193,15 @@ class ModalityRetrieval:
     
     def __init__(self, pretrained_model_path, modalities):
         # TODO: Initialize the retrieval system
+        # Load pretrained encoders
         self.encoders = {}
         for modality in modalities:
             encoder = ModalityEncoder(modality, feature_dim=128, num_classes=98).to('cuda')
             encoder.eval()
+            # Save them as a dictionary with modality as key
             self.encoders[modality] = encoder
-
+            
+        # Save the modalities
         self.modalities = modalities
         self.query_modality = modalities[0]
         self.target_modality = modalities[1]
@@ -280,21 +280,15 @@ class ModalityRetrieval:
         correct_5 = 0
         total = 0
         aps = []  # check the ap of each query
-        encoder = self.encoders[self.query_modality]
         
         with torch.no_grad():
             for batch in tqdm(query_loader):
                 # Get the query feature
-                query_data = batch['query'].to('cuda')
-                query_feats = encoder(query_data)  # (B, feature_dim)
-                query_feats = query_feats.cpu().numpy()
-                similarity = np.dot(query_feats, self.database_features.T)
-                sorted_indices = np.argsort(-similarity, axis=1)
-                
+                retrieved_all = self.retrieve(batch)
                 # get the accuracy and AP
                 for i, query_meta in enumerate(batch['query_meta']):
                     query_obj = query_meta[0]
-                    retrieved_objs = [self.database_meta[j][0] for j in sorted_indices[i]]
+                    retrieved_objs = [r[0] for r in retrieved_all[i]]
                     
                     # get the R@k
                     if query_obj == retrieved_objs[0]:

@@ -16,44 +16,44 @@ python train.py \
     --data_location ${DATA_ROOT} \
     --config_location ${CONFIG_PATH} \
     --split_location ${SPLIT_PATH} \
-    --backbone fenet \
+    --backbone resnet \
     --exp visual_exp \
     --num_workers 2 \
     --seed 42
 
-# Touch
-python train.py \
-    --finetune \
-    --task unimodal \
-    --modality touch \
-    --batch_size 32 \
-    --lr 5e-4 \
-    --weight_decay 1e-2 \
-    --epochs 100 \
-    --data_location ${DATA_ROOT} \
-    --config_location ${CONFIG_PATH} \
-    --split_location ${SPLIT_PATH} \
-    --backbone fenet \
-    --exp touch_exp \
-    --num_workers 2 \
-    --seed 42
+# # Touch
+# python train.py \
+#     --finetune \
+#     --task unimodal \
+#     --modality touch \
+#     --batch_size 32 \
+#     --lr 5e-4 \
+#     --weight_decay 1e-2 \
+#     --epochs 100 \
+#     --data_location ${DATA_ROOT} \
+#     --config_location ${CONFIG_PATH} \
+#     --split_location ${SPLIT_PATH} \
+#     --backbone fenet \
+#     --exp touch_exp \
+#     --num_workers 2 \
+#     --seed 42
 
-# Audio
-python train.py \
-    --finetune \
-    --task unimodal \
-    --modality audio \
-    --batch_size 32 \
-    --lr 3e-4 \
-    --weight_decay 5e-2 \
-    --epochs 100 \
-    --data_location ${DATA_ROOT} \
-    --config_location ${CONFIG_PATH} \
-    --split_location ${SPLIT_PATH} \
-    --backbone fenet \
-    --exp audio_exp \
-    --num_workers 2 \
-    --seed 42
+# # Audio
+# python train.py \
+#     --finetune \
+#     --task unimodal \
+#     --modality audio \
+#     --batch_size 32 \
+#     --lr 3e-4 \
+#     --weight_decay 5e-2 \
+#     --epochs 100 \
+#     --data_location ${DATA_ROOT} \
+#     --config_location ${CONFIG_PATH} \
+#     --split_location ${SPLIT_PATH} \
+#     --backbone fenet \
+#     --exp audio_exp \
+#     --num_workers 2 \
+#     --seed 42
 
 # # Define grid search ranges
 # lr_values=(1e-4 3e-4 5e-4)

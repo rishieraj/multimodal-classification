@@ -21,6 +21,7 @@ class LateFusion(nn.Module):
         self.touch_model = TouchClassifier(num_classes, backbone='fenet')
         self.audio_model = AudioClassifier(num_classes, backbone='fenet')
 
+        # Load pretrained models
         self.load_pretrained_models()
 
         # Freeze unimodal models
@@ -45,6 +46,7 @@ class LateFusion(nn.Module):
         """
         base_path = 'experiments/unimodal'
         
+        # Load checkpoints
         vision_ckpt = torch.load(f'{base_path}/visual_exp/best_model.pth', weights_only=False)
         touch_ckpt = torch.load(f'{base_path}/touch_exp/best_model.pth', weights_only=False)
         audio_ckpt = torch.load(f'{base_path}/audio_exp/best_model.pth', weights_only=False)
@@ -64,7 +66,9 @@ class LateFusion(nn.Module):
         4. Calculate and return loss if training
         """
         # TODO: Implement forward pass
+        # Get predictions from each modality
         vision_feats = self.vision_model.backbone(modalities['vision'])
+        # Add attention layer for touch and audio modalities
         touch_feats = self.touch_model.backbone.forward_head(
             self.touch_model.attention(
                 self.touch_model.backbone.forward_features(modalities['touch'])
@@ -95,6 +99,7 @@ class LateFusion(nn.Module):
         # Flatten and pass through MLP
         logits = self.fc(fused_feats.view(batch_size, -1))
 
+        # Return predictions and loss if training
         output = {'pred': logits}
         if 'label' in modalities:
             output['loss'] = F.cross_entropy(logits, modalities['label'])
@@ -168,7 +173,9 @@ class AttentionFusion(nn.Module):
         5. Calculate and return loss if training
         """
         # TODO: Implement forward pass
+        # Get predictions from each modality
         vision_feats = self.feature_proj(self.vision_model.backbone(modalities['vision']))
+        # Add attention layer for touch and audio modalities
         touch_feats = self.feature_proj(
             self.touch_model.backbone.forward_head(
                 self.touch_model.attention(
@@ -194,6 +201,7 @@ class AttentionFusion(nn.Module):
         fusion_preds = torch.cat([attended[0], attended[1], attended[2]], dim=1)
         logits = self.fc(fusion_preds)
 
+        # Return predictions and loss if training
         output = {'pred': logits}
         if 'label' in modalities:
             output['loss'] = F.cross_entropy(logits, modalities['label'])
